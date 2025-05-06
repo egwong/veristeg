@@ -135,7 +135,7 @@ def calculate_hash_places(mess_places, imag):
     i = 0
     while i < SHA256_BITS:
         num = rando.randint(START, image_length)
-        if num not in mess_places:
+        if num not in mess_places and num not in hash_places:
             hash_places.append(num)
             i += 1
     return hash_places
