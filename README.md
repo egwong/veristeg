@@ -13,6 +13,7 @@ This steganography implementation uses a very stupid pseudo-random system to hid
 * Veristeg uses the first pixel (pixel 0) as a seed for a pseudo-random algorithm to randomly choose pixels in the image to contain the hidden data.
 * Because I was lazy and didn't want to hide the length in the same manner, the length of the data is given in pixels 1-16 (not including pixel 0). (I might implement the pseudo-random placement for length as well later, same for the seed)
 * To save space and increase the amount of data that can be hidden, I implemented Huffman Encoding over UTF-8. I opted to not use Morse Code (even though it is smaller than my Huffman implementation) because Huffman solves the issue of intermediate representations being prefixes of other intermediate representations. The Huffman tree was built using the greedy algorithm discussed in CSC445 (Algorithms). 
+* The Huffman Encoding was also so that if the data was found, it would be significantly less obvious than if it was just UTF-8
 * It should go without saying that the data is hidden in the Red channels of pixels.
 
 **Hash Verification Implementation**
@@ -27,3 +28,5 @@ This steganography implementation uses a very stupid pseudo-random system to hid
 
 *TODO*
 * walk for files instead of direct search
+* randomize length declaration
+* make initialization pixel harder to find
