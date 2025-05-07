@@ -30,3 +30,7 @@ This steganography implementation uses a very stupid pseudo-random system to hid
 * walk for files instead of direct search
 * randomize length declaration
 * make initialization pixel harder to find
+  * Add option for password
+    * password should create an IV with multiple pixels
+  * make IV a combination of multiple pixels (hardcoded relative to size of image or found through pixel0)
+* increase diffusion somehow
