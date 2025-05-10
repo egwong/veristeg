@@ -5,8 +5,7 @@ import os
 import re
 import rng
 import hashlib
-from functions import (bytes_to_binary_string, get_target_file, get_actual_hash, is_valid_utf8,
-                       get_golden_ratio_pixels_with_offset)
+from functions import *
 from password import Password
 
 SHA256_BYTES = 32
@@ -68,7 +67,7 @@ def get_input():
             print('input not valid try again')
 
 
-def no_pass_generate_message_places(mess, imag_ob, initialization_vector):
+def generate_message_places(mess, imag_ob, initialization_vector):
     places = []
     y, x = divmod(initialization_vector, imag_ob.width)
 
@@ -80,7 +79,7 @@ def no_pass_generate_message_places(mess, imag_ob, initialization_vector):
     return places
 
 
-def no_pass_place_length(mess, imag_ob, working_path, initialization_vector):
+def no_mask_place_length(mess, imag_ob, working_path, initialization_vector):
     high, low = divmod(len(mess), 256)
 
     high_bits = format(high, '08b')
@@ -99,11 +98,11 @@ def no_pass_place_length(mess, imag_ob, working_path, initialization_vector):
         seed = r * g + b
         places = generate_places(seed, len(combined), imag_ob)
 
-    place_bits(places, combined, imag_ob, working_path)
+    no_mask_place_bits(places, combined, imag_ob, working_path)
 
 
 # put that shit into the image
-def place_bits(places, binary_data, imag, working_path):
+def no_mask_place_bits(places, binary_data, imag, working_path):
     try:
         width = imag.width
 
@@ -118,7 +117,7 @@ def place_bits(places, binary_data, imag, working_path):
                 pixels[x, y] = (new_r, g, b, a)
             img.save(working_path)
     except Exception as e:
-        print(f"failed in place_bits: {e}")
+        print(f"failed in no_mask_place_bits: {e}")
 
 
 def create_final_output(working_path, original_filename):
@@ -141,7 +140,7 @@ def create_final_output(working_path, original_filename):
 def determine_password_use():
     try:
         while True:
-            i = input("Would you like to encode you message with password protection ( [NOT] recommended)? (y/n): ")
+            i = input("Would you like to encode you message with password protection (recommended)? (y/n): ")
             if i.lower() == 'y':
                 return True
             elif i.lower() == 'n':
@@ -153,26 +152,6 @@ def determine_password_use():
         print(e)
 
 
-def get_password():
-    try:
-        while True:
-            i = input("Please provide the password (all UTF-8 allowed, length limit of 100 chars):\n")
-            if i and 100 > len(i) > 0 and is_valid_utf8(i):
-                good = input(f"Your password is [ {i} ], good? (y/n): ")
-                if good.lower() == 'y':
-                    return i
-                elif good.lower() == 'n':
-                    print("then try again")
-                else:
-                    print("only 'y' and 'n' please, try again")
-            else:
-                print("Password not good, password must satisfy: 100 > len(password) > 0 "
-                      "and is_valid_utf8(password), try again")
-
-    except Exception as e:
-        print(f"Failed at get_password: {e}")
-
-
 def create_modified_copy(original_path):
     cwd = os.getcwd()
     base_filename = os.path.basename(original_path)
@@ -182,6 +161,60 @@ def create_modified_copy(original_path):
         img = img.convert('RGBA')
         img.save(working_path)
     return working_path
+
+
+"""
+password functions
+"""
+
+
+def mask_place_length(mess, imag_ob, working_path, initialization_vector, length_mask):
+    high, low = divmod(len(mess), 256)
+
+    high_bits = format(high, '08b')
+    low_bits = format(low, '08b')
+
+    combined = high_bits + low_bits
+
+    y, x = divmod(initialization_vector, imag_ob.width)
+
+    with Image.open(working_path) as img:
+        img = img.convert('RGBA')
+        r, g, b, a = img.getpixel((x, y))
+        seed = r * g + b
+        places = generate_places(seed, len(combined), imag_ob)
+
+    mask_place_bits(places, combined, imag_ob, working_path, length_mask)
+
+
+def mask_place_bits(places, binary_data, imag, working_path, mask):
+    try:
+        width = imag.width
+
+        with Image.open(working_path) as img:
+            pixels = img.load()
+            for i in range(len(places)):
+                i_mask = i*3
+                bit_mask = mask[i_mask:i_mask+3]
+
+                place = places[i]
+                bit = int(binary_data[i])
+                y, x = divmod(place, width)
+                r, g, b, a = pixels[x, y]
+
+                if bit_mask == "100" or bit_mask == "011" or bit_mask == "111" or bit_mask == "000":
+                    new_r = (r & 0xFE) | bit
+                    pixels[x, y] = (new_r, g, b, a)
+                elif bit_mask == "101" or bit_mask == "010":
+                    new_g = (g & 0xFE) | bit
+                    pixels[x, y] = (r, new_g, b, a)
+                else:
+                    new_b = (b & 0xFE) | bit
+                    pixels[x, y] = (r, g, new_b, a)
+
+            img.save(working_path)
+    except Exception as e:
+        print(f"failed in mask_place_bits: {e}")
 
 
 def main():
@@ -206,9 +239,24 @@ def main():
 
     if password_use:
         string_password = get_password()
-        password = Password(string_password)
-        print('not implemented yet, COMING SOON')
-        exit(1)
+
+        password = Password(string_password, working_image.width, working_image.height)
+        password.set_message_length(len(bin_message))
+        mark_position_used(password.length_iv)
+        mark_position_used(password.message_iv)
+
+        mask_place_length(bin_message, working_image, working_path, password.length_iv, password.length_mask)
+
+        mess_places = generate_message_places(bin_message, file_ob, password.message_iv)
+        assert len(mess_places) == len(bin_message)
+        mask_place_bits(mess_places, bin_message, working_image, working_path, password.message_mask)
+
+        hash_places = generate_places(mess_places[0], 256, working_image)
+        byte_hash = mask_get_actual_hash(hash_places, working_image, password.hash_mask)
+        binary_hash = bytes_to_binary_string(byte_hash)
+
+        mask_place_bits(hash_places, binary_hash, working_image, working_path, password.hash_mask)
+
     else:
         with Image.open(working_path) as img:
             r, g, b, a = img.getpixel((0, 0))
@@ -225,16 +273,16 @@ def main():
         mark_position_used(len_iv)
         mark_position_used(mess_iv)
 
-        no_pass_place_length(bin_message, file_ob, working_path, len_iv)
-        mess_places = no_pass_generate_message_places(bin_message, file_ob, mess_iv)
+        no_mask_place_length(bin_message, working_image, working_path, len_iv)
+        mess_places = generate_message_places(bin_message, working_image, mess_iv)
         assert len(mess_places) == len(bin_message)
-        place_bits(mess_places, bin_message, file_ob, working_path)
+        no_mask_place_bits(mess_places, bin_message, working_image, working_path)
 
-        hash_places = generate_places(mess_places[0], 256, file_ob)
-        byte_hash = get_actual_hash(hash_places, working_image)
+        hash_places = generate_places(mess_places[0], 256, working_image)
+        byte_hash = no_mask_get_actual_hash(hash_places, working_image)
         binary_hash = bytes_to_binary_string(byte_hash)
 
-        place_bits(hash_places, binary_hash, file_ob, working_path)
+        no_mask_place_bits(hash_places, binary_hash, working_image, working_path)
 
     final_output = create_final_output(working_path, target_file)
 
