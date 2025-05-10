@@ -62,5 +62,25 @@ def is_valid_utf8(bytes_to_check):
         return False
 
 
+def get_golden_ratio_pixels_with_offset(width, height, offset=0):
+    # phi (simplified)
+    phi = 1.618033988749895
+
+    x1_with_offset = width / phi + offset
+    y1_with_offset = height / phi + offset
+
+    x2_with_offset = width * (1 - 1 / phi) + offset
+    y2_with_offset = height * (1 - 1 / phi) + offset
+
+    _, y1 = divmod(int(y1_with_offset), height)
+    _, x1 = divmod(int(x1_with_offset), width)
+
+    _, y2 = divmod(int(y2_with_offset), height)
+    _, x2 = divmod(int(x2_with_offset), width)
+
+    index1 = y1 * width + x1
+    index2 = y2 * width + x2
+
+    return index1, index2
 
 

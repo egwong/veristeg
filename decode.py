@@ -4,11 +4,8 @@ import rng
 import hashlib
 import image
 from huffman import Huffman
-from functions import get_target_file, get_actual_hash
+from functions import get_target_file, get_actual_hash, get_golden_ratio_pixels_with_offset
 
-# SHA256_BYTES = 32
-# SHA256_BITS = 256
-# START = 17
 SHA256_BYTES = 32
 SHA256_BITS = 256
 START = 1
@@ -58,7 +55,6 @@ duplicate functions over?
 """
 
 
-# used for hash-decoding from utf-8
 def bin_to_utf_string(bin_str):
     bytes_list = []
     for i in range(0, len(bin_str), 8):
@@ -72,10 +68,8 @@ def bin_to_utf_string(bin_str):
     return result
 
 
-def get_message_length(imag_ob):
-    image_length = (imag_ob.width * imag_ob.height) - 1
-    mark_position_used(image_length)
-    y_max, x_max = divmod(image_length, imag_ob.width)
+def get_message_length(imag_ob, initialization_vector):
+    y_max, x_max = divmod(initialization_vector, imag_ob.width)
 
     with Image.open(imag_ob.path) as img:
         r, g, b, a = img.getpixel((x_max, y_max))
@@ -100,46 +94,16 @@ def get_message_length(imag_ob):
         return 256 * high_int + low_int
 
 
-def get_places(mess_len, imag_ob):
-    height = imag_ob.height
-    width = imag_ob.width
-    image_length = width * height
-    places = []
-    # pixel_0 = seed
-    # pixel_1-16 = length
-    # start = 17
-    with Image.open(imag_ob.path) as img:
-        r, g, b, a = img.getpixel((0, 0))
-        seed = r * g + b
+def get_places(mess_len, imag_ob, initialization_vector):
+    y, x = divmod(initialization_vector, imag_ob.width)
 
-        # rando = rng.DeterministicRNG(seed=seed)
+    with Image.open(imag_ob.path) as img:
+        r, g, b, a = img.getpixel((x, y))
+        seed = r * g + b
 
         places = generate_places(seed, mess_len, imag_ob)
 
-        # i = 0
-        # while i < mess_len:
-        #     num = rando.randint(START, image_length)
-        #     if num not in places:
-        #         places.append(num)
-        #         i += 1
     return places
-
-
-def calculate_hash_places(mess_places, imag):
-    # image_length = imag.width * imag.height
-    # hash_places = []
-    # seed = mess_places[0]
-    # rando = rng.DeterministicRNG(seed=seed)
-    # i = 0
-    # while i < SHA256_BITS:
-    #     num = rando.randint(START, image_length)
-    #     if num not in mess_places:
-    #         hash_places.append(num)
-    #         i += 1
-    # return hash_places
-    return generate_places(mess_places[0], 256, imag)
-
-
 
 
 def get_message(places, imag):
@@ -187,15 +151,30 @@ def main():
 
     huffman = Huffman()
 
-    message_length = get_message_length(file_ob)
+    with Image.open(full_target) as img:
+        r, g, b, a = img.getpixel((0, 0))
+        offset = b
+    mark_position_used(0)
 
-    message_places = get_places(message_length, file_ob)
+    len_iv, mess_iv = get_golden_ratio_pixels_with_offset(file_ob.width, file_ob.height, offset)
+
+    i = 0
+    while (len_iv == 0 or mess_iv == 0) or (len_iv == mess_iv):
+        len_iv, mess_iv = get_golden_ratio_pixels_with_offset(file_ob.width, file_ob.height, offset + i)
+        i += 1
+
+    mark_position_used(len_iv)
+    mark_position_used(mess_iv)
+
+    message_length = get_message_length(file_ob, len_iv)
+
+    message_places = get_places(message_length, file_ob, mess_iv)
 
     message_binary = get_message(message_places, file_ob)
 
     decoded_message = huffman.decode(message_binary)
 
-    hash_places = calculate_hash_places(message_places, file_ob)
+    hash_places = generate_places(message_places[0], 256, file_ob)
 
     reported_hash = get_message(hash_places, file_ob)
     bytes_reported_hash = binary_string_to_bytes(reported_hash)
@@ -205,9 +184,9 @@ def main():
     print(f"Reported Hash: {bytes_reported_hash}")
     print(f"Actual Hash:   {real_hash}")
     if bytes_reported_hash == real_hash:
-        print("\nholy shit it worked, real_hash == reported_hash")
+        print("\nreal_hash == reported_hash\nFILE INTEGRITY MAINTAINED")
     else:
-        print("hashes not the same, corrupted file")
+        print("HASHES NOT THE SAME, FILE INTEGRITY LOST")
     print(f"\nFound Message: {decoded_message}")
 
 
