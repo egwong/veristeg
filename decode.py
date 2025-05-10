@@ -4,25 +4,58 @@ import rng
 import hashlib
 import image
 from huffman import Huffman
+from functions import get_target_file, get_actual_hash
 
+# SHA256_BYTES = 32
+# SHA256_BITS = 256
+# START = 17
 SHA256_BYTES = 32
 SHA256_BITS = 256
-START = 17
+START = 1
+USED_POSITIONS = []
 
 
-def get_target_file():
-    cwd = os.getcwd()
-    while True:
-        filename = input("Target PNG File (png only for now please): ")
-        full = os.path.join(cwd, filename)
-        if os.path.exists(full) and os.path.isfile(full):
-            try:
-                with Image.open(full) as img:
-                    return filename
-            except Exception as e:
-                print(f"file must be an image (png only for now)\n{e}\n")
-        print(f"{filename} not found; try again")
-        print("Target file must be in the Current Working Directory, or provide relative path")
+"""
+duplicate functions of generate_places, can't add to functions.py yet due to USED_POSITIONS being used
+"""
+
+
+def is_position_available(position):
+    return position not in USED_POSITIONS
+
+
+def mark_position_used(position):
+    if position not in USED_POSITIONS:
+        USED_POSITIONS.append(position)
+
+
+def mark_positions_used(positions):
+    for pos in positions:
+        mark_position_used(pos)
+
+
+def reset_positions():
+    global USED_POSITIONS
+    USED_POSITIONS = []
+
+
+def generate_places(seed, length, imag_ob):
+    image_length = (imag_ob.width * imag_ob.height) - 1
+    places = []
+    rando = rng.DeterministicRNG(seed=seed)
+    i = 0
+    while i < length:
+        num = rando.randint(START, image_length)
+        if is_position_available(num) and num != 0:
+            places.append(num)
+            mark_position_used(num)
+            i += 1
+    return places
+
+
+"""
+duplicate functions over?
+"""
 
 
 # used for hash-decoding from utf-8
@@ -39,12 +72,25 @@ def bin_to_utf_string(bin_str):
     return result
 
 
-def get_message_length(imag):
-    with Image.open(imag.path) as img:
+def get_message_length(imag_ob):
+    image_length = (imag_ob.width * imag_ob.height) - 1
+    mark_position_used(image_length)
+    y_max, x_max = divmod(image_length, imag_ob.width)
+
+    with Image.open(imag_ob.path) as img:
+        r, g, b, a = img.getpixel((x_max, y_max))
+
+        seed = r * g + b
+
+        places = generate_places(seed, 16, imag_ob)
         bin_list = []
-        for i in range(1,17):
-            r, g, b, a = img.getpixel((i, 0))
+        for i in range(16):
+            curr = places[i]
+            y, x = divmod(curr, imag_ob.width)
+            r, g, b, a = img.getpixel((x, y))
+
             bin_list.append(r % 2)
+
         high_bin = ''.join(str(bit) for bit in bin_list[:8])
         low_bin = ''.join(str(bit) for bit in bin_list[8:])
 
@@ -54,67 +100,46 @@ def get_message_length(imag):
         return 256 * high_int + low_int
 
 
-def get_places(mess_len, imag):
-    height = imag.height
-    width = imag.width
+def get_places(mess_len, imag_ob):
+    height = imag_ob.height
+    width = imag_ob.width
     image_length = width * height
     places = []
     # pixel_0 = seed
     # pixel_1-16 = length
     # start = 17
-    with Image.open(imag.path) as img:
+    with Image.open(imag_ob.path) as img:
         r, g, b, a = img.getpixel((0, 0))
         seed = r * g + b
 
-        rando = rng.DeterministicRNG(seed=seed)
+        # rando = rng.DeterministicRNG(seed=seed)
 
-        i = 0
-        while i < mess_len:
-            num = rando.randint(START, image_length)
-            if num not in places:
-                places.append(num)
-                i += 1
+        places = generate_places(seed, mess_len, imag_ob)
+
+        # i = 0
+        # while i < mess_len:
+        #     num = rando.randint(START, image_length)
+        #     if num not in places:
+        #         places.append(num)
+        #         i += 1
     return places
 
 
 def calculate_hash_places(mess_places, imag):
-    image_length = imag.width * imag.height
-    hash_places = []
-    seed = mess_places[0]
-    rando = rng.DeterministicRNG(seed=seed)
-    i = 0
-    while i < SHA256_BITS:
-        num = rando.randint(START, image_length)
-        if num not in mess_places:
-            hash_places.append(num)
-            i += 1
-    return hash_places
+    # image_length = imag.width * imag.height
+    # hash_places = []
+    # seed = mess_places[0]
+    # rando = rng.DeterministicRNG(seed=seed)
+    # i = 0
+    # while i < SHA256_BITS:
+    #     num = rando.randint(START, image_length)
+    #     if num not in mess_places:
+    #         hash_places.append(num)
+    #         i += 1
+    # return hash_places
+    return generate_places(mess_places[0], 256, imag)
 
 
-def get_actual_hash(hash_places, message_placed_image):
-    """
-    get the hash found in the actual image
-    :param hash_places: a list of places that the hash sits in
-    :param message_placed_image: stupid name from copying and pasting
-    :return: sha256 hash in byte form
-    """
-    height = message_placed_image.height
-    width = message_placed_image.width
-
-    with Image.open(message_placed_image.path) as img:
-        hash_img = img.copy()
-        pixels = hash_img.load()
-
-        for i in range(len(hash_places)):
-            place = hash_places[i]
-            y, x = divmod(place, width)
-            r, g, b, a = pixels[x, y]
-            pixels[x, y] = (0, g, b, a)
-
-        pixel_data = hash_img.convert('RGBA').tobytes()
-        hash_value = hashlib.sha256(pixel_data).digest()
-
-    return hash_value
 
 
 def get_message(places, imag):
@@ -138,14 +163,6 @@ def get_message(places, imag):
 
     message = ''.join(str(bit) for bit in message_list)
     return message
-
-
-def bytes_to_binary_string(hash_bytes):
-    binary_string = ''
-    for byte in hash_bytes:
-        binary_byte = format(byte, '08b')
-        binary_string += binary_byte
-    return binary_string
 
 
 def binary_string_to_bytes(binary_string):

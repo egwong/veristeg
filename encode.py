@@ -5,10 +5,32 @@ import os
 import re
 import rng
 import hashlib
+from functions import bytes_to_binary_string, get_target_file, get_actual_hash, is_valid_utf8
+from password import Password
 
 SHA256_BYTES = 32
 SHA256_BITS = 256
-START = 17
+START = 1
+USED_POSITIONS = []
+
+
+def is_position_available(position):
+    return position not in USED_POSITIONS
+
+
+def mark_position_used(position):
+    if position not in USED_POSITIONS:
+        USED_POSITIONS.append(position)
+
+
+def mark_positions_used(positions):
+    for pos in positions:
+        mark_position_used(pos)
+
+
+def reset_positions():
+    global USED_POSITIONS
+    USED_POSITIONS = []
 
 
 def validate_input(text):
@@ -31,186 +53,132 @@ def get_input():
             print('input not valid try again')
 
 
-def get_target_file():
-    cwd = os.getcwd()
-    while True:
-        filename = input("Target PNG File (png only for now please): ")
-        full = os.path.join(cwd, filename)
-        if os.path.exists(full) and os.path.isfile(full):
-            try:
-                with Image.open(full) as img:
-                    return filename
-            except Exception as e:
-                print(f"file must be an image (png only for now)\n{e}\n")
-        print(f"{filename} not found; try again")
-        print("Target file must be in the Current Working Directory, or provide relative path")
-
-
-def generate_places(mess, imag):
-    height = imag.height
-    width = imag.width
-    image_length = width * height
+def no_pass_generate_message_places(mess, imag_ob):
     places = []
-    # pixel_0 = seed
-    # pixel_1-16 = length
-    # start = 17
-    with Image.open(imag.path) as img:
+
+    with Image.open(imag_ob.path) as img:
         r, g, b, a = img.getpixel((0, 0))
         seed = r * g + b
 
-        rando = rng.DeterministicRNG(seed=seed)
-
-        i = 0
-        while i < len(mess):
-            num = rando.randint(START, image_length)
-            if num not in places and num != 0:
-                places.append(num)
-                i += 1
+        places = generate_places(seed, len(mess), imag_ob)
     return places
 
 
-def place_length(mess, imag):
+def no_pass_place_length(mess, imag_ob, working_path):
     high, low = divmod(len(mess), 256)
 
     high_bits = format(high, '08b')
     low_bits = format(low, '08b')
 
-    with Image.open(imag.path) as img:
+    combined = high_bits + low_bits
+
+    image_length = (imag_ob.width * imag_ob.height) - 1
+    mark_position_used(image_length)
+
+    y, x = divmod(image_length, imag_ob.width)
+
+    with Image.open(working_path) as img:
         img = img.convert('RGBA')
-        pixels = img.load()
+        r, g, b, a = img.getpixel((x, y))
+        seed = r * g + b
+        places = generate_places(seed, len(combined), imag_ob)
 
-        for i in range(8):
-            pixel_pos = i + 1
-            x, y = pixel_pos % img.width, pixel_pos // img.width
-            r, g, b, a = pixels[x, y]
+    place_bits(places, combined, imag_ob, working_path)
 
-            bit = int(high_bits[i])
-            new_r = (r & 0xFE) | bit
 
-            pixels[x, y] = (new_r, g, b, a)
-
-        for i in range(8):
-            pixel_pos = i + 9
-            x, y = pixel_pos % img.width, pixel_pos // img.width
-            r, g, b, a = pixels[x, y]
-
-            bit = int(low_bits[i])
-            new_r = (r & 0xFE) | bit
-
-            pixels[x, y] = (new_r, g, b, a)
-
-        img.save('length_placed_' + os.path.basename(imag.path))
-
-    return 'length_placed_' + os.path.basename(imag.path)
+def generate_places(seed, length, imag_ob):
+    image_length = (imag_ob.width * imag_ob.height) - 1
+    places = []
+    rando = rng.DeterministicRNG(seed=seed)
+    i = 0
+    while i < length:
+        num = rando.randint(START, image_length)
+        if is_position_available(num) and num != 0:
+            places.append(num)
+            mark_position_used(num)
+            i += 1
+    return places
 
 
 # put that shit into the image
-def place_message(places, message, imag):
-    # get the length, width of the image
-    height = imag.height
-    width = imag.width
+def place_bits(places, binary_data, imag, working_path):
+    try:
+        width = imag.width
 
-    with Image.open(imag.path) as img:
-        pixels = img.load()
-        for i in range(len(places)):
-            place = places[i]
-            mess_bit = message[i]
-            bit = int(mess_bit)
-            y, x = divmod(place, width)
-            # r, g, b, a = img.getpixel((x, y))
-            r, g, b, a = pixels[x, y]
-            new_r = (r & 0xFE) | bit
-            pixels[x, y] = (new_r, g, b, a)
-        img.save('message_placed_' + os.path.basename(imag.path))
-    return 'message_placed_' + os.path.basename(imag.path)
+        with Image.open(working_path) as img:
+            pixels = img.load()
+            for i in range(len(places)):
+                place = places[i]
+                bit = int(binary_data[i])
+                y, x = divmod(place, width)
+                r, g, b, a = pixels[x, y]
+                new_r = (r & 0xFE) | bit
+                pixels[x, y] = (new_r, g, b, a)
+            img.save(working_path)
+    except Exception as e:
+        print(f"failed in place_bits: {e}")
 
 
-# seed will need to be places[0]
-# has to be utf-8 because we won't know the size beforehand
-def calculate_hash_places(mess_places, imag):
-    image_length = imag.width * imag.height
-    hash_places = []
-    seed = mess_places[0]
-    rando = rng.DeterministicRNG(seed=seed)
-    i = 0
-    while i < SHA256_BITS:
-        num = rando.randint(START, image_length)
-        if num not in mess_places and num not in hash_places and num != 0:
-            hash_places.append(num)
-            i += 1
-    return hash_places
-
-
-def place_hash(places, hash_bits, imag):
-    # get the length, width of the image
-    height = imag.height
-    width = imag.width
-
-    with Image.open(imag.path) as img:
-        pixels = img.load()
-        for i in range(len(places)):
-            place = places[i]
-            hash_bit = hash_bits[i]
-            bit = int(hash_bit)
-            y, x = divmod(place, width)
-            # r, g, b, a = img.getpixel((x, y))
-            r, g, b, a = pixels[x, y]
-            new_r = (r & 0xFE) | bit
-            pixels[x, y] = (new_r, g, b, a)
-        img.save('hash_placed_' + os.path.basename(imag.path))
-    return 'hash_placed_' + os.path.basename(imag.path)
-
-
-# set all hash-places to 0 and then hash
-def get_hash(hash_places, message_placed_image):
-    height = message_placed_image.height
-    width = message_placed_image.width
-
-    with Image.open(message_placed_image.path) as img:
-        hash_img = img.copy()
-        pixels = hash_img.load()
-
-        for i in range(len(hash_places)):
-            place = hash_places[i]
-            y, x = divmod(place, width)
-            r, g, b, a = pixels[x, y]
-            pixels[x, y] = (0, g, b, a)
-
-        pixel_data = hash_img.convert('RGBA').tobytes()
-        hash_value = hashlib.sha256(pixel_data).digest()
-
-    return hash_value
-
-
-# convert hash bytes to a binary utf-8 string
-def bytes_to_binary_string(hash_bytes):
-    binary_string = ''
-    for byte in hash_bytes:
-        binary_byte = format(byte, '08b')
-        binary_string += binary_byte
-    return binary_string
-
-
-def clean_up_files(filenames):
-    for filename in filenames:
-        try:
-            os.remove(filename)
-        except Exception as e:
-            print(f"Error deleting {filename}: {e}")
-
-
-# deletes all the shit infront of the filename
-def create_final_output(final_hash_placed_path, original_filename):
+def create_final_output(working_path, original_filename):
     cwd = os.getcwd()
-
     base_filename = os.path.basename(original_filename)
     final_name = 'modified_' + base_filename
     final_path = os.path.join(cwd, final_name)
 
-    with Image.open(final_hash_placed_path) as img:
-        img.save(final_path)
+    try:
+        os.rename(working_path, final_path)
+    except:
+        with Image.open(working_path) as img:
+            img.save(final_path)
+        os.remove(working_path)
 
     return final_path
+
+
+def determine_password_use():
+    try:
+        while True:
+            i = input("Would you like to encode you message with password protection (recommended)? (y/n)")
+            if i.lower() == 'y':
+                return True
+            elif i.lower() == 'n':
+                return False
+            else:
+                print("Please only type 'y' or 'n'")
+    except Exception as e:
+        print("Failed to determine_password_use")
+        print(e)
+
+
+def get_password():
+    try:
+        while True:
+            i = input("Please provide the password (all UTF-8 allowed, length limit of 100 chars):\n")
+            if i and 100 > len(i) > 0 and is_valid_utf8(i):
+                good = input(f"Your password is [ {i} ], good? (y/n): ")
+                if good.lower() == 'y':
+                    return i
+                elif good.lower() == 'n':
+                    print("then try again")
+                else:
+                    print("only 'y' and 'n' please, try again")
+            else:
+                print("Password not good, password must satisfy: 100 > len(password) > 0 "
+                      "and is_valid_utf8(password), try again")
+
+    except Exception as e:
+        print(f"Failed at get_password: {e}")
+
+
+def create_modified_copy(original_path):
+    cwd = os.getcwd()
+    base_filename = os.path.basename(original_path)
+    working_name = 'temp_working_' + base_filename
+    working_path = os.path.join(cwd, working_name)
+    with Image.open(original_path) as img:
+        img = img.convert('RGBA')
+        img.save(working_path)
+    return working_path
 
 
 def main():
@@ -222,9 +190,10 @@ def main():
     # put hash into image
         # calculate where hash will go
         # ensure no collision with message
+    reset_positions()
 
+    hash_placed_full, mess_placed_name, len_placed_name, hash_placed_name, byte_hash = None, None, None, None, None
     cwd = os.getcwd()
-
     target_file = get_target_file()
     full_target = os.path.join(cwd, target_file)
     file_ob = image.ImageInfo(full_target)
@@ -233,37 +202,46 @@ def main():
     huffman = Huffman()
     bin_message = huffman.encode(message)
 
-    # place length
-    # delete later
-    len_placed_name = place_length(bin_message, file_ob)
-    len_placed_full = os.path.join(cwd, len_placed_name)
-    len_placed = image.ImageInfo(len_placed_full)
+    password_use = determine_password_use()
 
-    # get places
-    mess_places = generate_places(bin_message, file_ob)
-    assert len(mess_places) == len(bin_message)
+    # the modified copy
+    working_path = create_modified_copy(full_target)
+    working_image = image.ImageInfo(working_path)
 
-    # place message into len_placed
-    mess_placed_name = place_message(mess_places, bin_message, len_placed)
-    mess_placed_full = os.path.join(cwd, mess_placed_name)
-    mess_placed = image.ImageInfo(mess_placed_full)
+    # print("after creating working image")
 
-    # get hash places
-    # uses the original file_ob, hopefully doesn't cause issues
-    hash_places = calculate_hash_places(mess_places, file_ob)
+    if password_use:
+        string_password = get_password()
+        password = Password(string_password)
 
-    # get the hash of the image with no hash-place-pixels
-    byte_hash = get_hash(hash_places, mess_placed)
-    binary_hash = bytes_to_binary_string(byte_hash)
 
-    # place the hash
-    hash_placed_name = place_hash(hash_places, binary_hash, mess_placed)
-    hash_placed_full = os.path.join(cwd, hash_placed_name)
 
-    final_output = create_final_output(hash_placed_full, target_file)
 
-    to_clean = [mess_placed_name, len_placed_name, hash_placed_name]
-    clean_up_files(to_clean)
+    else:
+        no_pass_place_length(bin_message, file_ob, working_path)
+
+        # print("after no_pass_place_length")
+
+        mess_places = no_pass_generate_message_places(bin_message, file_ob)
+        assert len(mess_places) == len(bin_message)
+
+        # print("after assert")
+
+        place_bits(mess_places, bin_message, file_ob, working_path)
+
+        hash_places = generate_places(mess_places[0], 256, file_ob)
+
+        # print("after calculating hash places")
+
+        # For hash calculation, we need to compute it based on the current state of working_path
+        byte_hash = get_actual_hash(hash_places, working_image)
+        binary_hash = bytes_to_binary_string(byte_hash)
+
+        # print("after calculating bytes_to_binary_string for hash")
+
+        place_bits(hash_places, binary_hash, file_ob, working_path)
+
+    final_output = create_final_output(working_path, target_file)
 
     print(f"")
     print(f"Original Message Size: {len(message)*8} assuming UTF-8")
@@ -272,6 +250,7 @@ def main():
     print(f"")
 
     print(f"Calculated Hash (bytes): {byte_hash}")
+    print(f"Saved to: {final_output}")
 
 
 

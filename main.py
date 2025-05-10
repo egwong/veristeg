@@ -9,11 +9,13 @@ def main():
         if e_or_d.upper() == 'E':
             try:
                 encode.main()
+                encode.reset_positions()
             except Exception as e:
                 print(f"oopsie, something fucked up while encoding\n{e}")
         elif e_or_d.upper() == 'D':
             try:
                 decode.main()
+                decode.reset_positions()
             except Exception as e:
                 print(f"oopsie, something fucked up while decoding\n{e}")
         elif e_or_d.upper() == 'Q':
