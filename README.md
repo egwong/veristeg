@@ -4,6 +4,8 @@ This started because Jake Denno told me that it would be nearly impossible to do
 
 Run main.py to run the program for both encoding and decoding, for Mac is it 'python3 main.py' in the terminal.
 
+***! Steged files using a previous iteration of veristeg are not compatable with the new implementation***
+
 ***Do not use the password selection yet, it is not implemented and will cause an error. This is going to change, it lacks documentation, has repeat code that I copied and pasted from encode.py to decode.py, and this code makes it seem like I have never heard of the word 'efficiency'***
 
 ### How
